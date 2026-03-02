@@ -1,0 +1,47 @@
+#!/bin/bash
+
+# Style & Colors
+# /usr/bin/scraps
+G='\033[0;32m' # Green
+B='\033[0;34m' # Blue
+R='\033[0;31m' # Red
+NC='\033[0m'    # No Color
+TICK="${G}[ OK ]${NC}"
+
+#  Security Check
+if [[ $EUID -ne 0 ]]; then
+   echo -e "${R}Error: Scraps must be run as root${NC}"
+   exit 1
+fi
+
+PACKAGE=$1
+export USE_FLAGS=$2 # Pass use=all if provided
+RAW_URL="https://raw.githubusercontent.com/igotnoframes/scrap-repo/main"
+
+if [ -z "$PACKAGE" ]; then
+    echo "Usage: scraps [package] [use=flags]"
+    exit 1
+fi
+
+# Process
+echo -e "${B}>>> Locating recipe for:${NC} ${PACKAGE}..."
+
+# Download recipe
+wget -q "$RAW_URL/$PACKAGE.scrap" -O "/tmp/$PACKAGE.scrap"
+
+if [ $? -ne 0 ]; then
+    echo -e "${R}>>> Error: ${PACKAGE} not found in repository.${NC}"
+    exit 1
+fi
+
+# Execute the recipe (The recipe handles its own echos)
+bash "/tmp/$PACKAGE.scrap"
+
+# --- 4. Final Verification ---
+if [ $? -eq 0 ]; then
+    echo -e "${G}>>> Done installing ${PACKAGE} status ${TICK}"
+    rm -f "/tmp/$PACKAGE.scrap"
+else
+    echo -e "${R}>>> Installation of ${PACKAGE} failed!${NC}"
+    exit 1
+fi
