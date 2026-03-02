@@ -1,47 +1,82 @@
 #!/bin/bash
+# /usr/bin/scraps
 
 # Style & Colors
-# /usr/bin/scraps
 G='\033[0;32m' # Green
 B='\033[0;34m' # Blue
 R='\033[0;31m' # Red
-NC='\033[0m'    # No Color
+NC='\033[0m'    # No Color
 TICK="${G}[ OK ]${NC}"
 
-#  Security Check
+# Security Check
 if [[ $EUID -ne 0 ]]; then
-   echo -e "${R}Error: Scraps must be run as root${NC}"
-   exit 1
+   echo -e "${R}Error: Scraps must be run as root${NC}"
+   exit 1
 fi
 
 PACKAGE=$1
 export USE_FLAGS=$2 # Pass use=all if provided
 RAW_URL="https://raw.githubusercontent.com/igotnoframes/scrap-repo/main"
+DB_FILE="/var/lib/scraps/installed.txt"
+
+# Ensure database directory exists
+mkdir -p /var/lib/scraps
 
 if [ -z "$PACKAGE" ]; then
-    echo "Usage: scraps [package] [use=flags]"
-    exit 1
+    echo "Usage: scraps [package] [use=flags]"
+    exit 1
 fi
 
-# Process
+# --- Dependency Resolver Function ---
+resolve_deps() {
+    local recipe=$1
+    # Find dependencies in the recipe file
+    local deps=$(grep "# DEPENDS:" "$recipe" | sed 's/# DEPENDS: //g' | tr ',' ' ')
+
+    for dep in $deps; do
+        # Check if the dependency is already in our "installed" list
+        if ! grep -qx "$dep" "$DB_FILE" 2>/dev/null; then
+            echo -e "${B}>>> Dependency found: $dep. Resolving...${NC}"
+            # This makes the script call itself to handle the dependency first
+            $0 "$dep" "$USE_FLAGS"
+        else
+            echo -e "${G}>>> Dependency $dep is already satisfied.${NC}"
+        fi
+    done
+}
+
+# --- Main Process ---
+
+# Check if already installed
+if grep -qx "$PACKAGE" "$DB_FILE" 2>/dev/null; then
+    echo -e "${G}>>> $PACKAGE is already installed. Skipped.${NC}"
+    exit 0
+fi
+
 echo -e "${B}>>> Locating recipe for:${NC} ${PACKAGE}..."
 
 # Download recipe
 wget -q "$RAW_URL/$PACKAGE.scrap" -O "/tmp/$PACKAGE.scrap"
 
 if [ $? -ne 0 ]; then
-    echo -e "${R}>>> Error: ${PACKAGE} not found in repository.${NC}"
-    exit 1
+    echo -e "${R}>>> Error: ${PACKAGE} not found in repository.${NC}"
+    exit 1
 fi
 
-# Execute the recipe (The recipe handles its own echos)
+# Run the Dependency Resolver
+resolve_deps "/tmp/$PACKAGE.scrap"
+
+# Execute the recipe
+echo -e "${B}>>> Building ${PACKAGE}...${NC}"
 bash "/tmp/$PACKAGE.scrap"
 
-# --- 4. Final Verification ---
+# --- Final Verification & Logging ---
 if [ $? -eq 0 ]; then
-    echo -e "${G}>>> Done installing ${PACKAGE} status ${TICK}"
-    rm -f "/tmp/$PACKAGE.scrap"
+    # Add to the database so we don't install it again next time
+    echo "$PACKAGE" >> "$DB_FILE"
+    echo -e "${G}>>> Done installing ${PACKAGE} status ${TICK}"
+    rm -f "/tmp/$PACKAGE.scrap"
 else
-    echo -e "${R}>>> Installation of ${PACKAGE} failed!${NC}"
-    exit 1
+    echo -e "${R}>>> Installation of ${PACKAGE} failed!${NC}"
+    exit 1
 fi
