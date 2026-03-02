@@ -1,0 +1,59 @@
+#!/bin/bash
+# Scraps Package Manager - The heart of Scrap Linux
+
+G='\033[0;32m'
+B='\033[0;34m'
+R='\033[0;31m'
+NC='\033[0m'
+TICK="${G}[ OK ]${NC}"
+
+if [[ $EUID -ne 0 ]]; then
+   echo -e "${R}Error: root privileges required${NC}"
+   exit 1
+fi
+
+PACKAGE=$1
+export USE_FLAGS=$2
+RAW_URL="https://raw.githubusercontent.com/igotnoframes/scrap-repo/main"
+DB_FILE="/var/lib/scraps/installed.txt"
+
+mkdir -p /var/lib/scraps
+
+if [ -z "$PACKAGE" ]; then
+    echo "Usage: scraps [package] [use=flags]"
+    exit 1
+fi
+
+resolve_deps() {
+    local recipe=$1
+    local deps=$(grep "# DEPENDS:" "$recipe" | sed 's/# DEPENDS: //g' | tr ',' ' ')
+
+    for dep in $deps; do
+        if ! grep -qx "$dep" "$DB_FILE" 2>/dev/null; then
+            echo -e "${B}>>> Resolving dependency: $dep${NC}"
+            $0 "$dep" "$USE_FLAGS"
+        fi
+    done
+}
+
+if grep -qx "$PACKAGE" "$DB_FILE" 2>/dev/null; then
+    echo -e "${G}>>> $PACKAGE is already installed.${NC}"
+    exit 0
+fi
+
+echo -e "${B}>>> Fetching recipe: ${PACKAGE}...${NC}"
+wget -q "$RAW_URL/$PACKAGE.scrap" -O "/tmp/$PACKAGE.scrap" || { echo -e "${R}>>> Recipe not found${NC}"; exit 1; }
+
+resolve_deps "/tmp/$PACKAGE.scrap"
+
+echo -e "${B}>>> Building ${PACKAGE}...${NC}"
+bash "/tmp/$PACKAGE.scrap"
+
+if [ $? -eq 0 ]; then
+    echo "$PACKAGE" >> "$DB_FILE"
+    echo -e "${G}>>> Finished ${PACKAGE} ${TICK}"
+    rm -f "/tmp/$PACKAGE.scrap"
+else
+    echo -e "${R}>>> Build failed: ${PACKAGE}${NC}"
+    exit 1
+fi
